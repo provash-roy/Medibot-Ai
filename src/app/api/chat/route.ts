@@ -1,17 +1,46 @@
-import { NextResponse } from "next/server";
+import { llm } from "@/lib/llm";
+import { getVectorStore } from "@/lib/qdrant";
+import { NextRequest, NextResponse } from "next/server";
 
-import { buildChain } from "@/rag/chain";
+export async function POST(req: NextRequest) {
+  try {
+    const { question } = await req.json();
 
-export async function POST(req: Request) {
-  const body = await req.json();
+    const vectorStore = await getVectorStore();
 
-  const chain = await buildChain();
+    const retriever = vectorStore.asRetriever({
+      k: 5,
+    });
 
-  const result = await chain.invoke({
-    input: body.question,
-  });
+    const docs = await retriever.invoke(question);
 
-  return NextResponse.json({
-    answer: result.answer,
-  });
+    const context = docs.map((doc) => doc.pageContent).join("\n\n");
+
+    const prompt = `
+          You are a helpful assistant.
+          Answer from the provided context.
+
+          Context: ${context}
+
+          Question: ${question}
+        `;
+
+    const response = await llm.invoke(prompt);
+
+    return NextResponse.json({
+      answer: response.content,
+      sources: docs,
+    });
+  } catch (error) {
+    console.log(error);
+
+    return NextResponse.json(
+      {
+        success: false,
+      },
+      {
+        status: 500,
+      },
+    );
+  }
 }
