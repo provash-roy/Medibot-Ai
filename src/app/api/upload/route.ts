@@ -1,91 +1,51 @@
-import fs from "fs/promises";
 import path from "path";
 import { NextResponse } from "next/server";
-
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
-import { HuggingFaceTransformersEmbeddings } from "@langchain/community/embeddings/hf_transformers";
-import { Chroma } from "@langchain/community/vectorstores/chroma";
+
+import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
+import { TaskType } from "@google/generative-ai";
+import { QdrantVectorStore } from "@langchain/qdrant";
 
 export async function POST() {
+  const filePath = path.join(process.cwd(), "public", "medical.pdf");
+  const loader = new PDFLoader(filePath);
+  const docs = await loader.load();
 
-    const filePath = path.join(process.cwd(), "public", "medical.pdf");
-    // 1. Load PDF
+  console.log(`PDF Pages: ${docs.length}`);
 
-    const loader = new PDFLoader(filePath);
+  // 2. Split PDF
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 500,
+    chunkOverlap: 50,
+  });
 
-//   let tempFilePath: string | null = null;
+  const chunks = await splitter.splitDocuments(docs);
+  console.log(`Chunks Created: ${chunks.length}`);
 
-//   try {
-//     const formData = await request.formData();
-//     const file = formData.get("file");
+  const embeddings = new GoogleGenerativeAIEmbeddings({
+    model: "gemini-embedding-001", // 768 dimensions
+    taskType: TaskType.RETRIEVAL_DOCUMENT,
+    title: "Document title",
+  });
 
-//     if (!file || typeof file === "string") {
-//       return NextResponse.json(
-//         { success: false, error: "No file uploaded" },
-//         { status: 400 },
-//       );
-//     }
+  console.log("QDRANT URL:", process.env.QDRANT_URL);
 
-//     const fileName = path.basename(file.name || `upload-${Date.now()}.pdf`);
-//     const uploadDir = path.join(process.cwd(), "tmp");
-//     await fs.mkdir(uploadDir, { recursive: true });
+  const vectorStore = await QdrantVectorStore.fromDocuments(
+    chunks,
+    embeddings,
+    {
+      url: process.env.QDRANT_URL!,
+      apiKey: process.env.QDRANT_API_KEY!,
+      collectionName: "medibot-ai",
+    },
+  );
 
-//     tempFilePath = path.join(uploadDir, `${Date.now()}-${fileName}`);
-//     const buffer = Buffer.from(await file.arrayBuffer());
-//     await fs.writeFile(tempFilePath, buffer);
+  console.log("Stored in QDrant", vectorStore);
 
-//     // 1. Load PDF
-//     const loader = new PDFLoader(tempFilePath);
-    const docs = await loader.load();
-
-    console.log(`PDF Pages: ${docs.length}`);
-
-    // 2. Split PDF
-    const splitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 500,
-      chunkOverlap: 50,
-    });
-
-    const chunks = await splitter.splitDocuments(docs);
-    console.log(`Chunks Created: ${chunks.length}`);
-
-    // 3. HuggingFace Embedding Model
-    const embeddings = new HuggingFaceTransformersEmbeddings({
-      modelName: "sentence-transformers/all-MiniLM-L6-v2",
-    });
-
-    // 4. Store in ChromaDB
-    await Chroma.fromDocuments(chunks, embeddings, {
-      collectionName: "medical-book",
-      url: "http://localhost:8000",
-    });
-
-    console.log("Stored in ChromaDB");
-
-    return NextResponse.json({
-      success: true,
-      message: "PDF indexed successfully",
-      chunks: chunks.length,
-    });
+  return NextResponse.json({
+    success: true,
+    message: "PDF indexed successfully",
+    chunks: chunks.length,
+  });
 }
-//   } catch (error) {
-//     console.error(error);
-
-//     return NextResponse.json(
-//       {
-//         success: false,
-//         error: "Upload failed",
-//       },
-//       {
-//         status: 500,
-//       },
-//     );
-// }
-//   } finally {
-//     if (tempFilePath) {
-//       await fs.unlink(tempFilePath).catch(() => {
-//         // ignore cleanup errors
-//       });
-//     }
- 
