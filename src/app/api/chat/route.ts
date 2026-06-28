@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
       answer: response.content,
       sources: docs,
     });
+    
   } catch (error) {
     console.log(error);
 
